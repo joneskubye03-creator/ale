@@ -1,41 +1,57 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Plus, X, Clock, ChevronRight } from 'lucide-react';
-import { useFoodOrderSession, FoodItem } from '../contexts/FoodOrderSession';
-import { FoodSelectionModal } from '../components/FoodSelectionModal';
+import { Plus, X, Clock, ChevronRight } from 'lucide-react';
+import { useGlobalCart } from '../contexts/GlobalCartContext';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { mockDeliveryAddresses, getDeliveryAddressSuggestions } from '../data/mockDeliveryAddresses';
+
+interface Stop {
+  id: string;
+  address: string;
+  description?: string;
+  foodIds: string[];
+}
 
 export function FoodiesRoute() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { address: currentLocation, loading: locationLoading } = useGeolocation();
-  const {
-    cartItems,
-    currentLocationFoodIds,
-    stops,
-    addStop,
-    removeStop,
-    updateStop,
-    canAddStop,
-    getCurrentLocationFoods,
-    removeStopsWithoutFoodOrAddress,
-    deliveryLocation,
-    setDeliveryLocation,
-  } = useFoodOrderSession();
+  const { address: currentLocation } = useGeolocation();
+  const { cart, removeFromCart } = useGlobalCart();
+
   const currentLocationInputRef = useRef<HTMLInputElement>(null);
   const stopInputRefs = useRef<{ [key: string]: HTMLInputElement }>({});
 
-  const [showCurrentLocationModal, setShowCurrentLocationModal] = useState(false);
-  const [showStopModal, setShowStopModal] = useState<string | null>(null);
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [deliveryLocation, setDeliveryLocation] = useState('');
   const [currentLocationQuery, setCurrentLocationQuery] = useState('');
   const [stopAddressQuery, setStopAddressQuery] = useState<{ [key: string]: string }>({});
   const [activeLocationInput, setActiveLocationInput] = useState('current-location');
-  const [showCurrentLocationSuggestions, setShowCurrentLocationSuggestions] = useState(false);
-  const [showStopSuggestions, setShowStopSuggestions] = useState<{ [key: string]: boolean }>({});
   const [showRecentAddresses, setShowRecentAddresses] = useState(true);
   const [hasAutoFilled, setHasAutoFilled] = useState(false);
+  const [showCurrentLocationModal, setShowCurrentLocationModal] = useState(false);
+  const [showStopModal, setShowStopModal] = useState<string | null>(null);
+
+  const assignedToStopsIds = useMemo(() => {
+    const ids: string[] = [];
+    stops.forEach(stop => {
+      ids.push(...stop.foodIds);
+    });
+    return ids;
+  }, [stops]);
+
+  const unselectedFoods = useMemo(() => {
+    return cart.filter(food => !assignedToStopsIds.includes(food.id));
+  }, [cart, assignedToStopsIds]);
+
+  const maxAssignable = cart.length - 1;
+  const canAddStop = unselectedFoods.length > 1;
+
+  console.log('🛒 Cart:', cart.length);
+  console.log('📍 Stops:', stops.length);
+  console.log('📊 Assigned to stops:', assignedToStopsIds.length);
+  console.log('📊 Unselected foods:', unselectedFoods.length);
+  console.log('📊 Can add stop:', canAddStop);
 
   useEffect(() => {
     if (currentLocation && !deliveryLocation && !hasAutoFilled) {
@@ -45,19 +61,41 @@ export function FoodiesRoute() {
     } else if (deliveryLocation && !currentLocationQuery) {
       setCurrentLocationQuery(deliveryLocation);
     }
-  }, [currentLocation, deliveryLocation, setDeliveryLocation, hasAutoFilled, currentLocationQuery]);
+  }, [currentLocation, deliveryLocation, hasAutoFilled, currentLocationQuery]);
+
+  useEffect(() => {
+    const emptyStops = stops.filter(stop => stop.foodIds.length === 0 && !stop.address);
+    if (emptyStops.length > 0 && !canAddStop) {
+      setStops(prev => prev.filter(stop => stop.foodIds.length > 0 || stop.address));
+    }
+  }, [canAddStop, stops]);
+
+  useEffect(() => {
+    if (location.state) {
+      const { highlightCurrentLocation, autoAddStop } = location.state;
+
+      if (highlightCurrentLocation) {
+        setActiveLocationInput('current-location');
+        setTimeout(() => currentLocationInputRef.current?.focus(), 100);
+      }
+
+      if (autoAddStop && canAddStop) {
+        handleAddStop();
+      }
+
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state]);
 
   const handleCurrentLocationChange = (value: string) => {
     setCurrentLocationQuery(value);
     setDeliveryLocation(value);
-    setShowCurrentLocationSuggestions(false);
-    setShowRecentAddresses(value.length === 0 && activeLocationInput === 'current-location');
+    setShowRecentAddresses(value.length === 0);
   };
 
   const handleCurrentLocationSelect = (address: string) => {
     setDeliveryLocation(address);
     setCurrentLocationQuery(address);
-    setShowCurrentLocationSuggestions(false);
     setShowRecentAddresses(true);
     setActiveLocationInput('current-location');
 
@@ -74,22 +112,23 @@ export function FoodiesRoute() {
     e.stopPropagation();
     setCurrentLocationQuery('');
     setDeliveryLocation('');
-    setShowCurrentLocationSuggestions(false);
     setShowRecentAddresses(true);
     setTimeout(() => currentLocationInputRef.current?.focus(), 0);
   };
 
   const handleStopAddressChange = (stopId: string, value: string) => {
-    updateStop(stopId, { address: value });
+    setStops(prev => prev.map(stop =>
+      stop.id === stopId ? { ...stop, address: value } : stop
+    ));
     setStopAddressQuery(prev => ({ ...prev, [stopId]: value }));
-    setShowStopSuggestions(prev => ({ ...prev, [stopId]: false }));
     setShowRecentAddresses(value.length === 0);
   };
 
   const handleStopAddressSelect = (stopId: string, address: string, description: string) => {
-    updateStop(stopId, { address, description });
+    setStops(prev => prev.map(stop =>
+      stop.id === stopId ? { ...stop, address, description } : stop
+    ));
     setStopAddressQuery(prev => ({ ...prev, [stopId]: '' }));
-    setShowStopSuggestions(prev => ({ ...prev, [stopId]: false }));
     setShowRecentAddresses(true);
 
     const currentIndex = stops.findIndex(s => s.id === stopId);
@@ -107,21 +146,23 @@ export function FoodiesRoute() {
   const handleClearStop = (e: React.MouseEvent, stopId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    updateStop(stopId, { address: '' });
+    setStops(prev => prev.map(stop =>
+      stop.id === stopId ? { ...stop, address: '' } : stop
+    ));
     setStopAddressQuery(prev => ({ ...prev, [stopId]: '' }));
     setShowRecentAddresses(true);
     setTimeout(() => stopInputRefs.current[stopId]?.focus(), 0);
   };
 
   const handleAddStop = () => {
-    if (!canAddStop()) return;
+    if (!canAddStop) return;
 
-    const newStop = {
+    const newStop: Stop = {
       id: `stop-${Date.now()}`,
       address: '',
       foodIds: []
     };
-    addStop(newStop);
+    setStops(prev => [...prev, newStop]);
     setTimeout(() => {
       setActiveLocationInput(newStop.id);
       stopInputRefs.current[newStop.id]?.focus();
@@ -130,36 +171,88 @@ export function FoodiesRoute() {
   };
 
   const handleRemoveStop = (stopId: string) => {
-    removeStop(stopId);
+    setStops(prev => prev.filter(stop => stop.id !== stopId));
     setActiveLocationInput('current-location');
     setShowRecentAddresses(true);
   };
 
+  const handleToggleFoodForStop = (stopId: string, foodId: string) => {
+    setStops(prev => prev.map(stop => {
+      if (stop.id !== stopId) return stop;
+
+      const isSelected = stop.foodIds.includes(foodId);
+      if (isSelected) {
+        return { ...stop, foodIds: stop.foodIds.filter(id => id !== foodId) };
+      } else {
+        if (assignedToStopsIds.length >= maxAssignable) {
+          return stop;
+        }
+        return { ...stop, foodIds: [...stop.foodIds, foodId] };
+      }
+    }));
+  };
+
+  const handleRemoveFoodFromCurrentLocation = (foodId: string) => {
+    const isAssignedToStops = assignedToStopsIds.includes(foodId);
+    const isMaxReached = assignedToStopsIds.length >= maxAssignable;
+
+    if (isMaxReached && !isAssignedToStops) {
+      return;
+    }
+
+    removeFromCart(foodId);
+
+    setStops(prev => prev
+      .map(stop => ({
+        ...stop,
+        foodIds: stop.foodIds.filter(id => id !== foodId)
+      }))
+      .filter(stop => stop.foodIds.length > 0 || stop.address)
+    );
+  };
+
   const handleGoToDelivery = () => {
-    removeStopsWithoutFoodOrAddress();
     navigate('/food-delivery');
   };
 
-  useEffect(() => {
-    if (location.state) {
-      const { highlightCurrentLocation, autoAddStop } = location.state;
+  const pickupLocation = cart[0]?.storeName || 'Store';
 
-      if (highlightCurrentLocation) {
-        setActiveLocationInput('current-location');
-        setTimeout(() => currentLocationInputRef.current?.focus(), 100);
-      }
+  const getFoodCountForStop = (stopId: string): number => {
+    const stop = stops.find(s => s.id === stopId);
+    return stop ? stop.foodIds.length : 0;
+  };
 
-      if (autoAddStop) {
-        handleAddStop();
-      }
+  const getStopButtonText = (stopId: string): string => {
+    const count = getFoodCountForStop(stopId);
+    if (count === 0) return 'Add food';
+    return `Food added (${count})`;
+  };
 
-      navigate(location.pathname, { replace: true, state: {} });
+  const isFoodDisabled = (foodId: string, stopId: string): boolean => {
+    const stop = stops.find(s => s.id === stopId);
+    if (!stop) return false;
+
+    const isAlreadySelected = stop.foodIds.includes(foodId);
+    if (isAlreadySelected) return false;
+
+    const isAssignedToOtherStop = assignedToStopsIds.includes(foodId) && !stop.foodIds.includes(foodId);
+    if (isAssignedToOtherStop) return true;
+
+    if (assignedToStopsIds.length >= maxAssignable) return true;
+
+    return false;
+  };
+
+  const canDeleteFood = (foodId: string): boolean => {
+    const isAssignedToStops = assignedToStopsIds.includes(foodId);
+    const isMaxReached = assignedToStopsIds.length >= maxAssignable;
+
+    if (isMaxReached && !isAssignedToStops) {
+      return false;
     }
-  }, [location.state]);
 
-  const currentLocationFoods = getCurrentLocationFoods();
-  const currentLocationSuggestions = getDeliveryAddressSuggestions(currentLocationQuery);
-  const pickupLocation = cartItems[0]?.storeName || 'Store';
+    return true;
+  };
 
   return (
     <motion.div
@@ -172,7 +265,7 @@ export function FoodiesRoute() {
         <div className="p-3">
           <div className="flex items-center gap-2 mb-3">
             <motion.button
-              onClick={() => navigate('/order-foodies/' + cartItems[0]?.storeId)}
+              onClick={() => navigate('/order-foodies/' + cart[0]?.storeId)}
               whileTap={{ scale: 0.95 }}
               className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors flex-shrink-0"
             >
@@ -187,13 +280,13 @@ export function FoodiesRoute() {
 
             <motion.button
               onClick={handleAddStop}
-              disabled={!canAddStop()}
+              disabled={!canAddStop}
               className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors flex-shrink-0 ${
-                canAddStop()
+                canAddStop
                   ? 'bg-green-500 hover:bg-green-600 text-white'
                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
               }`}
-              whileTap={{ scale: canAddStop() ? 0.95 : 1 }}
+              whileTap={{ scale: canAddStop ? 0.95 : 1 }}
             >
               <Plus size={16} />
             </motion.button>
@@ -231,25 +324,24 @@ export function FoodiesRoute() {
                 )}
                 <motion.button
                   onClick={() => setShowCurrentLocationModal(true)}
-                  disabled={currentLocationFoods.length === 0}
-                  className="relative ml-2 flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full border border-gray-200 hover:bg-gray-100 transition-colors"
-                  whileTap={{ scale: 0.95 }}
+                  disabled={cart.length === 0}
+                  className="relative ml-2 flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full border border-gray-200 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  whileTap={{ scale: cart.length > 0 ? 0.95 : 1 }}
                 >
                   <span className="text-sm">🍔</span>
                   <span className="text-[10px] font-medium text-gray-700">View your foodies</span>
-                  {currentLocationFoods.length > 0 && (
+                  {cart.length > 0 && (
                     <motion.span
                       initial={{ scale: 0 }}
                       animate={{ scale: 1 }}
                       className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center"
                     >
-                      {currentLocationFoods.length}
+                      {cart.length}
                     </motion.span>
                   )}
                 </motion.button>
               </div>
             </div>
-
           </div>
 
           <AnimatePresence>
@@ -294,12 +386,21 @@ export function FoodiesRoute() {
                     )}
                     <motion.button
                       onClick={() => setShowStopModal(stop.id)}
-                      className="ml-2 px-2 py-1 bg-gray-50 rounded-full border border-gray-200 hover:bg-gray-100 transition-colors"
+                      className="ml-2 px-2 py-1 bg-gray-50 rounded-full border border-gray-200 hover:bg-gray-100 transition-colors relative"
                       whileTap={{ scale: 0.95 }}
                     >
                       <span className="text-[10px] font-medium text-gray-700">
-                        {stop.foodIds.length > 0 ? `+${stop.foodIds.length}` : 'Add food'}
+                        {getStopButtonText(stop.id)}
                       </span>
+                      {getFoodCountForStop(stop.id) > 0 && (
+                        <motion.span
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center"
+                        >
+                          {getFoodCountForStop(stop.id)}
+                        </motion.span>
+                      )}
                     </motion.button>
                   </div>
                   <button
@@ -370,17 +471,14 @@ export function FoodiesRoute() {
       >
         <motion.button
           onClick={handleGoToDelivery}
-          disabled={cartItems.length === 0}
+          disabled={cart.length === 0}
           className={`w-full py-3 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
-            cartItems.length > 0
+            cart.length > 0
               ? 'bg-green-600 text-white hover:bg-green-700 shadow-lg'
               : 'bg-gray-300 text-gray-500 cursor-not-allowed'
           }`}
-          whileTap={{ scale: cartItems.length > 0 ? 0.98 : 1 }}
-          whileHover={{ scale: cartItems.length > 0 ? 1.02 : 1 }}
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', damping: 20, stiffness: 300, delay: 0.3 }}
+          whileTap={{ scale: cart.length > 0 ? 0.98 : 1 }}
+          whileHover={{ scale: cart.length > 0 ? 1.02 : 1 }}
         >
           Go to delivery
           <motion.div
@@ -392,23 +490,175 @@ export function FoodiesRoute() {
         </motion.button>
       </motion.div>
 
-      <FoodSelectionModal
-        isOpen={showCurrentLocationModal}
-        onClose={() => setShowCurrentLocationModal(false)}
-        title="Your Food"
-        stopId="current-location"
-        mode="current-location"
-      />
+      <AnimatePresence>
+        {showCurrentLocationModal && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-black z-40"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCurrentLocationModal(false)}
+            />
 
-      {showStopModal && (
-        <FoodSelectionModal
-          isOpen={true}
-          onClose={() => setShowStopModal(null)}
-          title="Select Food for Stop"
-          stopId={showStopModal}
-          mode="stop"
-        />
-      )}
+            <motion.div
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl z-50 max-h-[80vh] overflow-y-auto"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            >
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-3xl">
+                <h2 className="text-xl font-bold text-gray-900">Your Food ({cart.length})</h2>
+                <motion.button
+                  onClick={() => setShowCurrentLocationModal(false)}
+                  className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors"
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <X size={20} className="text-gray-600" />
+                </motion.button>
+              </div>
+
+              <div className="px-6 py-4 space-y-3 pb-24">
+                {cart.map((item, index) => {
+                  const canDelete = canDeleteFood(item.id);
+
+                  return (
+                    <motion.div
+                      key={item.id}
+                      className="w-full p-4 rounded-2xl border-2 border-gray-200 bg-white flex items-center space-x-4"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                    >
+                      <div className="w-16 h-16 rounded-lg bg-gray-200 overflow-hidden flex-shrink-0">
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+
+                      <div className="flex-1 text-left">
+                        <h3 className="font-bold text-gray-900">{item.name}</h3>
+                        <p className="text-sm text-gray-600">K{item.price}</p>
+                      </div>
+
+                      {canDelete && (
+                        <motion.button
+                          onClick={() => handleRemoveFoodFromCurrentLocation(item.id)}
+                          className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
+                          whileTap={{ scale: 0.9 }}
+                        >
+                          <X size={16} className="text-white" />
+                        </motion.button>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showStopModal && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-black z-40"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowStopModal(null)}
+            />
+
+            <motion.div
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl z-50 max-h-[80vh] overflow-y-auto"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            >
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-3xl">
+                <h2 className="text-xl font-bold text-gray-900">Select Food for Stop</h2>
+                <motion.button
+                  onClick={() => setShowStopModal(null)}
+                  className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center hover:bg-gray-200 transition-colors"
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <X size={20} className="text-gray-600" />
+                </motion.button>
+              </div>
+
+              <div className="px-6 py-4 space-y-3 pb-24">
+                {cart.map((item, index) => {
+                  const stop = stops.find(s => s.id === showStopModal);
+                  const isSelected = stop?.foodIds.includes(item.id) || false;
+                  const isDisabled = isFoodDisabled(item.id, showStopModal);
+
+                  return (
+                    <motion.button
+                      key={item.id}
+                      onClick={() => !isDisabled && handleToggleFoodForStop(showStopModal, item.id)}
+                      disabled={isDisabled}
+                      className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center space-x-4 ${
+                        isSelected
+                          ? 'border-green-600 bg-green-50'
+                          : isDisabled
+                          ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed'
+                          : 'border-gray-200 bg-white hover:border-gray-300'
+                      }`}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                    >
+                      <div className="w-16 h-16 rounded-lg bg-gray-200 overflow-hidden flex-shrink-0">
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+
+                      <div className="flex-1 text-left">
+                        <h3 className="font-bold text-gray-900">{item.name}</h3>
+                        <p className="text-sm text-gray-600">K{item.price}</p>
+                      </div>
+
+                      {isSelected && (
+                        <motion.div
+                          className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center flex-shrink-0"
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          transition={{ type: 'spring', damping: 12, stiffness: 200 }}
+                        >
+                          <span className="text-white text-sm">✓</span>
+                        </motion.div>
+                      )}
+                    </motion.button>
+                  );
+                })}
+              </div>
+
+              <motion.div
+                className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-6"
+                initial={{ y: 100 }}
+                animate={{ y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <motion.button
+                  onClick={() => setShowStopModal(null)}
+                  className="w-full bg-green-600 text-white font-bold py-4 rounded-2xl hover:bg-green-700 transition-colors"
+                  whileTap={{ scale: 0.98 }}
+                >
+                  OK
+                </motion.button>
+              </motion.div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

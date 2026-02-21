@@ -23,6 +23,7 @@ import { MessageProvider } from './contexts/MessageContext';
 import { RideProvider } from './contexts/RideContext';
 import { OrderSessionProvider } from './contexts/OrderSessionContext';
 import { FoodOrderSessionProvider } from './contexts/FoodOrderSession';
+import { GlobalCartProvider } from './contexts/GlobalCartContext';
 import { CurrentRideBar } from './components/CurrentRideBar';
 import { WaitingForDriverBar } from './components/WaitingForDriverBar';
 import { RatingModal } from './components/RatingModal';
@@ -240,10 +241,11 @@ function AppContent() {
   };
 
   return (
-    <OrderSessionProvider>
-      <FoodOrderSessionProvider>
-        <MessageProvider userId={profile?.id || null} rideId={appState.currentRideId}>
-          <RideProvider rideId={appState.currentRideId}>
+    <GlobalCartProvider>
+      <OrderSessionProvider>
+        <FoodOrderSessionProvider>
+          <MessageProvider userId={profile?.id || null} rideId={appState.currentRideId}>
+            <RideProvider rideId={appState.currentRideId}>
           <div className="app">
           <AnimatePresence>
             {isRideActive() && driverInfo && location.pathname !== '/driver-coming' && (
@@ -409,10 +411,11 @@ function AppContent() {
             />
           )}
         </div>
-        </RideProvider>
-        </MessageProvider>
-      </FoodOrderSessionProvider>
-    </OrderSessionProvider>
+          </RideProvider>
+          </MessageProvider>
+        </FoodOrderSessionProvider>
+      </OrderSessionProvider>
+    </GlobalCartProvider>
   );
 }
 

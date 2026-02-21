@@ -2,14 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, ShoppingCart, Plus, X, CheckCircle } from 'lucide-react';
-import { useOrderSession } from '../contexts/OrderSessionContext';
+import { useGlobalCart } from '../contexts/GlobalCartContext';
 import { getFoodsByStore } from '../services/mockFoodService';
 import { mockStores } from '../data/storesData';
 
 export const OrderFoodies: React.FC = () => {
   const { storeId } = useParams<{ storeId: string }>();
   const navigate = useNavigate();
-  const { orderSession, addToCart, removeFromCart } = useOrderSession();
+  const { cart, addToCart, removeFromCart } = useGlobalCart();
 
   const [foods, setFoods] = useState<any[]>([]);
   const [storeName, setStoreName] = useState('');
@@ -37,13 +37,14 @@ export const OrderFoodies: React.FC = () => {
     setFoods(storeFoods);
   }, [storeId, navigate]);
 
-  const cartCount = orderSession.cartItems.filter(item => item.storeId === storeId).length;
-  const cartTotal = orderSession.cartItems
-    .filter(item => item.storeId === storeId)
-    .reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const cartCount = cart.length;
+  const cartTotal = cart.reduce((sum, item) => sum + item.price, 0);
+
+  console.log('🛒 Cart count:', cartCount);
+  console.log('📦 Cart items:', cart);
 
   const isInCart = (foodId: string) => {
-    return orderSession.cartItems.some(item => item.id.startsWith(foodId));
+    return cart.some(item => item.id.startsWith(foodId));
   };
 
   const handleAddToCart = (food: any) => {
@@ -53,15 +54,14 @@ export const OrderFoodies: React.FC = () => {
       storeName: food.storeName,
       name: food.name,
       image: food.image,
-      price: food.price,
-      quantity: 1
+      price: food.price
     });
     setRecentlyAdded(food.id);
     setTimeout(() => setRecentlyAdded(null), 500);
   };
 
   const handleRemoveFromCart = (foodId: string) => {
-    const itemToRemove = orderSession.cartItems.find(item => item.id.startsWith(foodId));
+    const itemToRemove = cart.find(item => item.id.startsWith(foodId));
     if (itemToRemove) {
       removeFromCart(itemToRemove.id);
     }
@@ -113,7 +113,6 @@ export const OrderFoodies: React.FC = () => {
       transition={{ duration: 0.3 }}
       className="flex flex-col h-screen bg-gray-50"
     >
-      {/* Fixed Header */}
       <div className="fixed top-0 left-0 right-0 z-10 bg-white px-4 py-3 border-b border-gray-100">
         <div className="flex items-center justify-between mb-3">
           <motion.button
@@ -141,7 +140,6 @@ export const OrderFoodies: React.FC = () => {
         <h1 className="text-xl font-bold text-gray-900">{storeName}</h1>
       </div>
 
-      {/* Scrollable Food Grid */}
       <motion.div
         variants={containerVariants}
         initial="hidden"
@@ -211,7 +209,6 @@ export const OrderFoodies: React.FC = () => {
         </div>
       </motion.div>
 
-      {/* Fixed Bottom Button */}
       <div className="fixed bottom-0 left-0 right-0 z-10 bg-white px-4 py-3 border-t border-gray-100">
         <button
           onClick={handleCompleteOrder}
